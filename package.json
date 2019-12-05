@@ -1,0 +1,14 @@
+{
+  "name": "terraform-fargate-boilerplate",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "task": "aws ecs run-task --cluster hello-world-default-cluster --task-definition hello-world-default",
+    "docker-build": "docker build -t hello-world-default .",
+    "push-ecr": "docker tag hello-world-default:latest $(aws sts get-caller-identity --query Account --output text).dkr.ecr.us-east-1.amazonaws.com/hello-world-default:latest && docker push $(aws sts get-caller-identity --query Account --output text).dkr.ecr.us-east-1.amazonaws.com/hello-world-default:latest"
+  },
+  "author": "",
+  "license": "ISC"
+}
