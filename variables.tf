@@ -18,6 +18,11 @@ variable "app_count" {
   default     = 1
 }
 
+variable "environment" {
+  description = "Current environment / stage."
+  default     = "dev"
+}
+
 variable "fargate_cpu" {
   description = "Fargate instance CPU units to provision (1 vCPU = 1024 CPU units)"
   default     = "256"

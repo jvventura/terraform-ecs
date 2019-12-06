@@ -24,3 +24,9 @@ Login with Docker:
 Authenticate AWS with Docker:
 `aws ecr get-login --region us-east-1 --no-include-email`
 The output of the above command is a command to authenticate. Simply copy, paste, and run.
+
+## Executing task
+
+The task will be setup to be triggered by defined Cloudwatch event rule pattern in `tf_templates`.
+
+To execute the task, setup a `aws events put-event` call.

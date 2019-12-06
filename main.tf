@@ -6,7 +6,7 @@ provider "aws" {
 
 locals {
 	name = "hello-world"
-	environment = "dev"
+	environment = var.environment
 }
 
 # VPC - This sets up the cloud networking for the cluster.
@@ -45,22 +45,7 @@ resource "aws_ecr_repository" "default" {
 }
 
 data "template_file" "ecr-lifecycle" {
-  	template = <<DEFINITION
-	{
-		"rules": [{
-			"rulePriority": 1,
-			"description": "Expire outdated tagged images",
-			"selection": {
-			"tagStatus": "any",
-			"countType": "imageCountMoreThan",
-			"countNumber": 1
-			},
-			"action": {
-				"type": "expire"
-			}
-		}]
-	}
-	DEFINITION
+  	template = file("${path.module}/tf_templates/ecr_lifecycle.json")
 }
 
 resource "aws_ecr_lifecycle_policy" "this" {
@@ -90,31 +75,6 @@ resource "aws_iam_role_policy_attachment" "cloudwatch" {
 	policy_arn	= "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
 }
 
-# data "template_file" "tasks_execution_ssm" {
-#   count = var.ssm_allowed_parameters != "" ? 1 : 0
-
-#   template = file("${path.module}/policies/ecs-task-execution-role-policy-ssm.json")
-
-#   vars = {
-#     ssm_parameters_arn = replace(var.ssm_allowed_parameters, "arn:aws:ssm", "") == var.ssm_allowed_parameters ? "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.ssm_allowed_parameters}" : var.ssm_allowed_parameters
-#   }
-# }
-
-# resource "aws_iam_policy" "tasks_execution_ssm" {
-#   count = var.ssm_allowed_parameters != "" ? 1 : 0
-
-#   name = "${var.name}-${terraform.workspace}-task-execution-ssm-policy"
-
-#   policy = data.template_file.tasks_execution_ssm[count.index].rendered
-# }
-
-# resource "aws_iam_role_policy_attachment" "tasks_execution_ssm" {
-#   count = var.ssm_allowed_parameters != "" ? 1 : 0
-
-#   role       = aws_iam_role.tasks_execution.name
-#   policy_arn = aws_iam_policy.tasks_execution_ssm[count.index].arn
-# }
-
 # ECS - This sets up the cluster, service, and defines the task(s).
 
 resource "aws_ecs_task_definition" "this" {
@@ -128,15 +88,13 @@ resource "aws_ecs_task_definition" "this" {
 	container_definitions = <<DEFINITION
 	[
 		{
-			"cpu": ${var.fargate_cpu},
 			"image": "${aws_ecr_repository.default.repository_url}",
-			"memory": ${var.fargate_memory},
 			"name": "${local.name}-default",
 			"networkMode": "awsvpc",
 			"portMappings": [
 				{
-				"containerPort": ${var.app_port},
-				"hostPort": ${var.app_port}
+					"containerPort": ${var.app_port},
+					"hostPort": ${var.app_port}
 				}
 			],
 			"logConfiguration": {
@@ -146,10 +104,6 @@ resource "aws_ecs_task_definition" "this" {
 					"awslogs-group": "${local.name}-${terraform.workspace}",
 					"awslogs-stream-prefix": "${local.name}"
 				}
-			},
-			"awsvpcConfiguration": {
-				"subnets": ${jsonencode(module.vpc.private_subnets)},
-				"securityGroups": ${jsonencode(module.vpc.default_security_group_id)}
 			}
 		}
 	]
@@ -160,15 +114,43 @@ resource "aws_ecs_cluster" "this" {
 	name = "${local.name}-${terraform.workspace}-cluster"
 }
 
-resource "aws_ecs_service" "this" {
-	name            = "main"
-	cluster         = aws_ecs_cluster.this.id
-	task_definition = aws_ecs_task_definition.this.arn
-	desired_count   = var.app_count
-	launch_type     = "FARGATE"
+# We don't need a service, this runs constantly.
+# resource "aws_ecs_service" "this" {
+# 	name            = "main"
+# 	cluster         = aws_ecs_cluster.this.id
+# 	task_definition = aws_ecs_task_definition.this.arn
+# 	desired_count   = var.app_count
+# 	launch_type     = "FARGATE"
 
-	network_configuration {
-    	security_groups = [module.vpc.default_security_group_id]
-    	subnets         = module.vpc.private_subnets
+# 	network_configuration {
+#     	security_groups = [module.vpc.default_security_group_id]
+#     	subnets         = module.vpc.private_subnets
+# 	}
+# }
+
+## Cloudwatch event
+
+resource "aws_cloudwatch_event_rule" "triggered_task" {
+	name		= "${local.name}_${local.environment}_triggered_task"
+	description	= "Run ${local.name}_${local.environment} task on triggered event."
+	event_pattern = jsonencode(jsondecode(file("${path.module}/tf_templates/cloudwatch_event_rule_patterns.json"))[0])
+}
+
+resource "aws_cloudwatch_event_target" "triggered_task" {
+	target_id = "${local.name}_${local.environment}_triggered_task_target"
+	rule      = aws_cloudwatch_event_rule.triggered_task.name
+	arn       = aws_ecs_cluster.this.id
+	role_arn  = aws_iam_role.tasks_execution.arn
+
+	ecs_target {
+		task_count          = var.app_count
+		task_definition_arn = aws_ecs_task_definition.this.arn
+		launch_type         = "FARGATE"
+		platform_version    = "LATEST"
+
+		network_configuration {
+			security_groups = [module.vpc.default_security_group_id]
+			subnets         = module.vpc.private_subnets
+		}
 	}
 }

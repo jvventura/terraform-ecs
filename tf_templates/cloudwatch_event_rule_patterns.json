@@ -1,0 +1,6 @@
+[
+    {
+        "Source": "custom.hello-world",
+        "DetailType": ["Custom event for triggering hello-world."]
+    }
+]
